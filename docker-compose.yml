@@ -1,0 +1,63 @@
+# Docker Compose untuk development / demo / VPS kecil.
+# Salin .env.docker.example menjadi .env, isi password & APP_KEY, lalu: docker compose up -d --build
+services:
+  app:
+    build: .
+    ports:
+      - "8080:80"
+    env_file: .env
+    environment:
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Upload lokal (UPLOAD_DISK=public). Untuk produksi multi-server gunakan S3-compatible.
+      - storage-public:/var/www/html/storage/app/public
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+    # Port database TIDAK dibuka ke luar. Hanya bisa diakses container lain.
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Opsional: docker compose --profile worker up -d
+  queue:
+    build: .
+    profiles: ["worker"]
+    command: php artisan queue:work --tries=1 --sleep=3
+    env_file: .env
+    environment:
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    profiles: ["worker"]
+    command: php artisan schedule:work
+    env_file: .env
+    environment:
+      DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  storage-public:
